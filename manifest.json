@@ -1,0 +1,26 @@
+{
+  "name": "tabstats",
+  "display_name": "Tab Stats",
+  "version": "1.0.0",
+  "description": "Beta. Tab list stats for Bed Wars, SkyWars, Murder Mystery and Duels: overlay tab list, respawn timers, configurable columns. Needs your own Hypixel API key.",
+  "author": "unknown",
+  "homepage": null,
+  "dependencies": [
+    {
+      "name": "hypixel-mod-api",
+      "version": "1.0.0",
+      "optional": false
+    },
+    {
+      "name": "denicker",
+      "version": null,
+      "optional": true
+    },
+    {
+      "name": "urchin",
+      "version": null,
+      "optional": true
+    }
+  ],
+  "min_starfish_version": null
+}
