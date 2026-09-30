@@ -2,7 +2,7 @@ plugin = {
     name = "tabstats",
     displayName = "Tab Stats",
     prefix = "§dTS",
-    version = "1.0.0",
+    version = "1.0.2",
     author = "Zoobo",
     credits = "Zoobo",
     description = "Beta. Tab list stats for Bed Wars, SkyWars, Murder Mystery and Duels: overlay tab list, respawn timers, configurable columns. Needs your own Hypixel API key.",
@@ -55,7 +55,7 @@ local warnedNoKey = false
 local locationKnown = false
 local locationMode = nil
 local locationDuelsMode = nil
-local replay = { on = false, loggedGame = nil }
+local replay = { on = false, loggedGame = nil, loggedViewers = {} }
 local lastPregame = nil
 
 local NICKED_STATS = { isNicked = true }
@@ -820,11 +820,16 @@ local function isBedwarsTeamPrefix(prefix)
     return starfish.text.plain(prefix or ""):match("^%u%s+$") ~= nil
 end
 
--- Replays list the people watching as "[Viewer] name".
+-- Recorded players in a replay have v2 UUIDs, anyone else in the tab is watching.
+function replay.isMe(player)
+    local ok, me = pcall(starfish.players.me)
+    return ok and me and me.uuid ~= nil and me.uuid == player.uuid
+end
+
 function replay.isViewer(player)
     if not replay.on then return false end
-    local ok, me = pcall(starfish.players.me)
-    if ok and me and me.uuid and me.uuid == player.uuid then return true end
+    if replay.isMe(player) then return true end
+    if type(player.uuid) == "string" and player.uuid:sub(15, 15) ~= "2" then return true end
     local shown = starfish.text.plain(teamPrefixOf(player.name) .. (player.displayName or ""))
     return shown:find("[Viewer]", 1, true) ~= nil
 end
@@ -931,13 +936,25 @@ end
 function gameEntries()
     local ok, players = pcall(starfish.players.all)
     if not ok or not players then return {} end
-    local list, ignored = {}, {}
+    local list, ignored, viewers = {}, {}, {}
     for _, player in ipairs(players) do
         local name = player.name
-        if name and player.uuid and not isPlaceholderUuid(player.uuid) then
+        local viewer = name and player.uuid and replay.isViewer(player)
+        if viewer then
             -- Your own replay lists you twice, as the recorded player and as a viewer.
-            local keep = not replay.isViewer(player)
-            if keep and managed[name] == nil then
+            if replay.isMe(player) or not joinTracking or seenOnServer[name] == true then
+                viewers[#viewers + 1] = player
+                if not replay.loggedViewers[name] then
+                    replay.loggedViewers[name] = true
+                    trace("replay viewer: " .. name .. " (uuid v" .. player.uuid:sub(15, 15)
+                        .. ", shown as " .. describe(teamPrefixOf(name) .. (player.displayName or name)) .. ")")
+                end
+            else
+                ignored[#ignored + 1] = name
+            end
+        elseif name and player.uuid and not isPlaceholderUuid(player.uuid) then
+            local keep = true
+            if managed[name] == nil then
                 keep = not joinTracking or seenOnServer[name] == true
                 if keep and active == "bedwars" and not replay.on then keep = isBedwarsTeamPrefix(teamPrefixOf(name)) end
             end
@@ -953,7 +970,7 @@ function gameEntries()
         trace("ignored " .. #ignored .. " tab entries that are not in this game: "
             .. table.concat(ignored, ", ", 1, math.min(#ignored, 8)) .. (#ignored > 8 and ", ..." or ""))
     end
-    return list
+    return list, viewers
 end
 
 local function computeLayout()
@@ -1515,7 +1532,7 @@ end
 
 -- Same order as the client: spectators last, then team name, then name.
 local function overlayPlayers()
-    local players = gameEntries()
+    local players, viewers = gameEntries()
 
     local list = {}
     for _, player in ipairs(players) do
@@ -1583,6 +1600,11 @@ local function overlayPlayers()
         if a.teamName ~= b.teamName then return a.teamName < b.teamName end
         return a.name < b.name
     end)
+    table.sort(viewers, function(a, b) return a.name < b.name end)
+    for _, player in ipairs(viewers) do
+        list[#list + 1] = { name = player.name, uuid = player.uuid, player = player, viewer = true,
+            teamName = "", prefix = "§7", suffix = "", spectator = true }
+    end
     return list
 end
 
@@ -1615,19 +1637,33 @@ local function overlayLayout(measure)
     local anyStatus = false
     local cells = {}
     for index, entry in ipairs(list) do
-        local st = statsFor(entry.name)
-        local grayed = isGrayed(entry.name, ownTeam)
         local row = {}
-        for colIndex, column in ipairs(cols) do
-            if column.isName then
-                row[colIndex] = nameText(entry)
-            else
-                local value = column.value(st)
-                row[colIndex] = grayed and grayText(value) or value
+        if entry.viewer then
+            local labelled = false
+            for colIndex, column in ipairs(cols) do
+                if column.isName then
+                    row[colIndex] = "§7" .. entry.name
+                elseif not labelled then
+                    labelled = true
+                    row[colIndex] = column.header == "Stars" and "§7[SPEC]" or "§7SPEC"
+                else
+                    row[colIndex] = "§8-"
+                end
             end
+        else
+            local st = statsFor(entry.name)
+            local grayed = isGrayed(entry.name, ownTeam)
+            for colIndex, column in ipairs(cols) do
+                if column.isName then
+                    row[colIndex] = nameText(entry)
+                else
+                    local value = column.value(st)
+                    row[colIndex] = grayed and grayText(value) or value
+                end
+            end
+            if scores then row.hp = hpText(scores[entry.name] or 0) end
+            row.status = statusText(entry.name)
         end
-        if scores then row.hp = hpText(scores[entry.name] or 0) end
-        row.status = statusText(entry.name)
         anyStatus = anyStatus or row.status ~= nil
         cells[index] = row
     end
@@ -1779,7 +1815,7 @@ local function drawOverlay()
                 centered(row[colIndex], x, cell.w, capTop)
             end
         end
-        if layout.hp then
+        if layout.hp and row.hp then
             centered(row.hp, tableX + layout.hp.x, layout.hp.w, capTop)
         end
         if layout.status and row.status then
@@ -2504,6 +2540,7 @@ starfish.events.on("session:join", function()
     locationDuelsMode = nil
     replay.on = false
     replay.loggedGame = nil
+    replay.loggedViewers = {}
     chatOpen = false
 end)
 
