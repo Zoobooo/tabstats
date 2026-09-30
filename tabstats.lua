@@ -55,6 +55,7 @@ local warnedNoKey = false
 local locationKnown = false
 local locationMode = nil
 local locationDuelsMode = nil
+local replay = { on = false, loggedGame = nil }
 local lastPregame = nil
 
 local NICKED_STATS = { isNicked = true }
@@ -523,6 +524,7 @@ local function registerSchema()
             }},
             { key = "tab.scale", type = "cycle", default = DEFAULT_SCALE, displayLabel = "Size", description = "Overlay size, the same at any resolution. 75% is close to the vanilla tab list.", values = SCALE_VALUES },
             { key = "tab.grayOwnTeam", type = "toggle", default = false, displayLabel = "Gray Own Team", description = "Render your own team's stats in gray to de-emphasize them." },
+            { key = "tab.replays", type = "toggle", default = true, displayLabel = "Show in Replays", description = "Also show tab stats while watching a Hypixel replay (/replay)." },
         }
     })
 
@@ -804,7 +806,7 @@ end
 -- Bed Wars and Duels pre-game lobbies list placeholder entries with v2 UUIDs
 -- (real players are v4, nicks v1); some stay listed after the game starts.
 local function isPlaceholderUuid(uuid)
-    return type(uuid) == "string" and uuid:sub(15, 15) == "2"
+    return not replay.on and type(uuid) == "string" and uuid:sub(15, 15) == "2"
 end
 
 -- players.all() can still hold entries from the previous server, so only
@@ -816,6 +818,15 @@ local ignoredLogged = false
 
 local function isBedwarsTeamPrefix(prefix)
     return starfish.text.plain(prefix or ""):match("^%u%s+$") ~= nil
+end
+
+-- Replays list the people watching as "[Viewer] name".
+function replay.isViewer(player)
+    if not replay.on then return false end
+    local ok, me = pcall(starfish.players.me)
+    if ok and me and me.uuid and me.uuid == player.uuid then return true end
+    local shown = starfish.text.plain(teamPrefixOf(player.name) .. (player.displayName or ""))
+    return shown:find("[Viewer]", 1, true) ~= nil
 end
 
 local function isObfuscatedEntry(name)
@@ -902,6 +913,7 @@ local function statusText(name)
 end
 
 local function myTeamColor()
+    if replay.on then return nil end
     local ok, me = pcall(starfish.players.me)
     local color = ok and me and me.name and teamColorOf(me.name)
     if not color or color == "§r" then return nil end
@@ -923,10 +935,11 @@ function gameEntries()
     for _, player in ipairs(players) do
         local name = player.name
         if name and player.uuid and not isPlaceholderUuid(player.uuid) then
-            local keep = managed[name] ~= nil
-            if not keep then
+            -- Your own replay lists you twice, as the recorded player and as a viewer.
+            local keep = not replay.isViewer(player)
+            if keep and managed[name] == nil then
                 keep = not joinTracking or seenOnServer[name] == true
-                if keep and active == "bedwars" then keep = isBedwarsTeamPrefix(teamPrefixOf(name)) end
+                if keep and active == "bedwars" and not replay.on then keep = isBedwarsTeamPrefix(teamPrefixOf(name)) end
             end
             if keep then
                 list[#list + 1] = player
@@ -2299,8 +2312,8 @@ local function activate()
     dirty = true
     resetGame()
     game.started = active == "bedwars"
-    game.startedAt = game.started and starfish.time.monotonic() or nil
-    trace("Tab stats active: " .. MODES[active].label
+    game.startedAt = game.started and not replay.on and starfish.time.monotonic() or nil
+    trace("Tab stats active: " .. MODES[active].label .. (replay.on and " replay" or "")
         .. (duelsKey and (" (" .. table.concat(duelsKey, ", ") .. ")") or ""))
     trackTabList()
     if not refreshTimer then
@@ -2324,6 +2337,12 @@ local function applyLocation(loc)
     local nextMode = inGame and mode or nil
 
     trace("location " .. describe(loc) .. " -> " .. tostring(nextMode))
+
+    replay.on = loc.serverType == "REPLAY"
+    if replay.on then
+        nextMode = replay.mode()
+        loc = { mode = nil }
+    end
 
     locationMode = nextMode
     locationDuelsMode = loc.mode
@@ -2375,7 +2394,29 @@ local function detectFromScoreboard()
     return nil
 end
 
+-- Replays report mode BASE, the real game is on the sidebar's Game: line.
+function replay.mode()
+    if getConfig("tab.replays", true) ~= true then return nil end
+    for _, text in ipairs(sidebarTexts() or {}) do
+        local gameName = text:match("^Game:%s*(.-)%s*$")
+        if gameName then
+            local upper = gameName:upper()
+            local mode = nil
+            for needle, id in pairs(TITLE_MODES) do
+                if upper:find(needle, 1, true) then mode = id end
+            end
+            if gameName ~= replay.loggedGame then
+                replay.loggedGame = gameName
+                trace("replay of " .. gameName .. " -> " .. tostring(mode))
+            end
+            return mode
+        end
+    end
+    return nil
+end
+
 local function detectedMode()
+    if replay.on then return replay.mode() end
     if locationKnown then return locationMode end
     return detectFromScoreboard()
 end
@@ -2413,7 +2454,7 @@ end
 local function detectTickBody()
     local detected = detectedMode()
 
-    if detected and OBFUSCATED_PREGAME[detected] then
+    if detected and OBFUSCATED_PREGAME[detected] and not replay.on then
         local pregame = inPregameLobby()
         if pregame ~= lastPregame then
             lastPregame = pregame
@@ -2461,6 +2502,8 @@ starfish.events.on("session:join", function()
     duelsKey = nil
     locationMode = nil
     locationDuelsMode = nil
+    replay.on = false
+    replay.loggedGame = nil
     chatOpen = false
 end)
 
