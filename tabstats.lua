@@ -488,6 +488,7 @@ local function columns()
     return list
 end
 
+local DEFAULT_SCALE = 75
 local SCALE_VALUES = {}
 for _, percent in ipairs({ 50, 60, 70, 75, 80, 85, 90, 95, 100, 110, 125, 150 }) do
     SCALE_VALUES[#SCALE_VALUES + 1] = { text = percent .. "%", value = percent }
@@ -520,7 +521,7 @@ local function registerSchema()
                 { text = "Overlay", value = "overlay" },
                 { text = "Tab list", value = "tablist" }
             }},
-            { key = "tab.scale", type = "cycle", default = 100, displayLabel = "Size", description = "Overlay size. 100% matches the design screenshot at any resolution.", values = SCALE_VALUES },
+            { key = "tab.scale", type = "cycle", default = DEFAULT_SCALE, displayLabel = "Size", description = "Overlay size, the same at any resolution. 75% is close to the vanilla tab list.", values = SCALE_VALUES },
             { key = "tab.grayOwnTeam", type = "toggle", default = false, displayLabel = "Gray Own Team", description = "Render your own team's stats in gray to de-emphasize them." },
         }
     })
@@ -806,6 +807,17 @@ local function isPlaceholderUuid(uuid)
     return type(uuid) == "string" and uuid:sub(15, 15) == "2"
 end
 
+-- players.all() can still hold entries from the previous server, so only
+-- players who joined since the last server switch count.
+local gameEntries
+local seenOnServer = {}
+local joinTracking = false
+local ignoredLogged = false
+
+local function isBedwarsTeamPrefix(prefix)
+    return starfish.text.plain(prefix or ""):match("^%u%s+$") ~= nil
+end
+
 local function isObfuscatedEntry(name)
     local player = starfish.players.byName(name)
     if player and isPlaceholderUuid(player.uuid) then return true end
@@ -902,6 +914,33 @@ end
 
 local function grayText(text)
     return "§8" .. starfish.text.plain(text)
+end
+
+function gameEntries()
+    local ok, players = pcall(starfish.players.all)
+    if not ok or not players then return {} end
+    local list, ignored = {}, {}
+    for _, player in ipairs(players) do
+        local name = player.name
+        if name and player.uuid and not isPlaceholderUuid(player.uuid) then
+            local keep = managed[name] ~= nil
+            if not keep then
+                keep = not joinTracking or seenOnServer[name] == true
+                if keep and active == "bedwars" then keep = isBedwarsTeamPrefix(teamPrefixOf(name)) end
+            end
+            if keep then
+                list[#list + 1] = player
+            else
+                ignored[#ignored + 1] = name
+            end
+        end
+    end
+    if #ignored > 0 and not ignoredLogged and tabActive then
+        ignoredLogged = true
+        trace("ignored " .. #ignored .. " tab entries that are not in this game: "
+            .. table.concat(ignored, ", ", 1, math.min(#ignored, 8)) .. (#ignored > 8 and ", ..." or ""))
+    end
+    return list
 end
 
 local function computeLayout()
@@ -1416,7 +1455,7 @@ local function useOverlay()
 end
 
 local function overlayScale(viewportHeight)
-    local percent = tonumber(getConfig("tab.scale", 100)) or 100
+    local percent = tonumber(getConfig("tab.scale", DEFAULT_SCALE)) or DEFAULT_SCALE
     return viewportHeight / REFERENCE_UNITS_PER_HEIGHT * percent / 100
 end
 
@@ -1463,8 +1502,7 @@ end
 
 -- Same order as the client: spectators last, then team name, then name.
 local function overlayPlayers()
-    local ok, players = pcall(starfish.players.all)
-    if not ok or not players then return {} end
+    local players = gameEntries()
 
     local list = {}
     for _, player in ipairs(players) do
@@ -1512,8 +1550,23 @@ local function overlayPlayers()
             }
         end
     end
+    -- Every Bed Wars player gets their own scoreboard team (Blue7, Blue9), so
+    -- rows are grouped by the team letter instead.
+    local groupOf, groupOrder, lastOf = {}, {}, {}
+    for _, entry in ipairs(list) do
+        local group = entry.teamName
+        if active == "bedwars" and isBedwarsTeamPrefix(entry.prefix) then
+            group = "letter:" .. starfish.text.plain(entry.prefix)
+        end
+        groupOf[entry] = group
+        if groupOrder[group] == nil or entry.teamName < groupOrder[group] then groupOrder[group] = entry.teamName end
+        lastOf[entry] = entry.spectator and not (active == "bedwars" and game.respawns[entry.name] ~= nil)
+    end
     table.sort(list, function(a, b)
-        if a.spectator ~= b.spectator then return not a.spectator end
+        if lastOf[a] ~= lastOf[b] then return not lastOf[a] end
+        local orderA, orderB = groupOrder[groupOf[a]], groupOrder[groupOf[b]]
+        if orderA ~= orderB then return orderA < orderB end
+        if groupOf[a] ~= groupOf[b] then return groupOf[a] < groupOf[b] end
         if a.teamName ~= b.teamName then return a.teamName < b.teamName end
         return a.name < b.name
     end)
@@ -1916,6 +1969,7 @@ local function deactivate()
     resetGame()
     overlay.bindLogged = false
     overlay.loggedDraw = false
+    ignoredLogged = false
     overlay.statusTraces = 0
     keyTraces = 0
     chatTraces = 0
@@ -2212,8 +2266,9 @@ end
 local function manage(name, uuid)
     if managed[name] then return end
     if isObfuscatedEntry(name) then return end
+    local team = scoreboardTeamOf(name)
     trace("tracking " .. name .. " (uuid v" .. tostring(uuid):sub(15, 15)
-        .. ", team prefix " .. describe(teamPrefixOf(name)) .. ")")
+        .. ", team " .. tostring(team and team.name) .. ", prefix " .. describe(teamPrefixOf(name)) .. ")")
     managed[name] = { uuid = uuid }
     byUuid[uuid] = name
     game.ghosts[name] = nil
@@ -2224,7 +2279,7 @@ end
 local lastTrackedCount = nil
 
 local function trackTabList()
-    local players = starfish.players.all()
+    local players = gameEntries()
     if #players ~= lastTrackedCount then
         lastTrackedCount = #players
         trace("tab list: " .. #players .. " players"
@@ -2386,7 +2441,7 @@ local function detectTickBody()
         end
     elseif active and not tabActive then
         activate()
-    elseif active and tabActive and next(managed) == nil then
+    elseif active and tabActive then
         trackTabList()
     end
 end
@@ -2399,6 +2454,8 @@ end
 starfish.timers.interval(1000, detectTick)
 
 starfish.events.on("session:join", function()
+    seenOnServer = {}
+    joinTracking = true
     deactivate()
     active = nil
     duelsKey = nil
@@ -2408,6 +2465,7 @@ starfish.events.on("session:join", function()
 end)
 
 starfish.events.on("player:join", function(event)
+    if event.name then seenOnServer[event.name] = true end
     if not tabActive or not event.name or not event.uuid then return end
     manage(event.name, event.uuid)
 end)
