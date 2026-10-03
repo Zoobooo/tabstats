@@ -14,7 +14,7 @@ plugin = {
 }
 
 local HYPIXEL_PLAYER_API = "https://api.hypixel.net/v2/player?uuid="
-local MOJANG_PROFILE_API = "https://api.mojang.com/users/profiles/minecraft/"
+local MOJANG_PROFILE_API = "https://mowojang.matdoes.dev/users/profiles/minecraft/"
 local CACHE_TTL = 300
 local FETCH_RETRIES = 3
 local RETRY_BASE_MS = 2000
@@ -751,26 +751,30 @@ local function fetchStats(key, query, attempt)
 end
 
 local function requestStats(name, callback)
-    local realName = getRealName(name)
-    if not realName and isNicked(name) then
-        if callback then callback(NICKED_STATS) end
+    local shown = replay.lookupName(name)
+    local function done(st)
+        if callback then callback(st) end
+    end
+
+    local realName = getRealName(shown)
+    if not realName and isNicked(shown) then
+        done(NICKED_STATS)
         return
     end
 
-    local query = realName or name
+    local query = realName or shown
     local key = query:lower()
-    if callback then
-        fetchCallbacks[key] = fetchCallbacks[key] or {}
-        table.insert(fetchCallbacks[key], callback)
-    end
+    fetchCallbacks[key] = fetchCallbacks[key] or {}
+    table.insert(fetchCallbacks[key], done)
 
     fetchStats(key, query)
 end
 
 local function statsFor(name)
-    local realName = getRealName(name)
-    if not realName and isNicked(name) then return NICKED_STATS end
-    return stats[(realName or name):lower()]
+    local shown = replay.lookupName(name)
+    local realName = getRealName(shown)
+    if not realName and isNicked(shown) then return NICKED_STATS end
+    return stats[(realName or shown):lower()]
 end
 
 local function displayNameOf(name)
@@ -792,6 +796,38 @@ local function scoreboardTeamOf(name)
     return ok and team or nil
 end
 
+-- Replays keep colour + name within 16 characters and put the rest of a long
+-- name in the team suffix ("§9" "The_Girly_Migh" "ty"), so there the name is
+-- read the way the tab shows it.
+function replay.tabName(name)
+    if not replay.on then return name end
+    local team = scoreboardTeamOf(name)
+    if not team then return name end
+    local shown = starfish.text.plain((team.prefix or "") .. name .. (team.suffix or "")):match("^%s*(.-)%s*$")
+    if shown:match("^[%w_]+$") and #shown <= 16 then return shown end
+    return name
+end
+
+-- Before its team arrives a long name may still be cut off; a name under 14
+-- characters can't have been.
+function replay.nameFinal(name)
+    return not replay.on or #name < 14 or scoreboardTeamOf(name) ~= nil
+end
+
+-- Chat has the full name, the tab entry may be cut off.
+function replay.entryFor(shown)
+    if not shown or not replay.on then return shown end
+    for name, entry in pairs(managed) do
+        if entry.shown == shown then return name end
+    end
+    return shown
+end
+
+function replay.lookupName(name)
+    local entry = managed[name]
+    return entry and entry.shown or name
+end
+
 local function teamPrefixOf(name)
     local team = scoreboardTeamOf(name)
     if team then return team.prefix or "" end
@@ -810,7 +846,8 @@ local function isPlaceholderUuid(uuid)
 end
 
 -- players.all() can still hold entries from the previous server, so only
--- players who joined since the last server switch count.
+-- entries added since the last server switch count. By UUID: a replay of the
+-- same game reuses every name.
 local gameEntries
 local seenOnServer = {}
 local joinTracking = false
@@ -942,7 +979,7 @@ function gameEntries()
         local viewer = name and player.uuid and replay.isViewer(player)
         if viewer then
             -- Your own replay lists you twice, as the recorded player and as a viewer.
-            if replay.isMe(player) or not joinTracking or seenOnServer[name] == true then
+            if replay.isMe(player) or not joinTracking or seenOnServer[player.uuid] == true then
                 viewers[#viewers + 1] = player
                 if not replay.loggedViewers[name] then
                     replay.loggedViewers[name] = true
@@ -954,8 +991,8 @@ function gameEntries()
             end
         elseif name and player.uuid and not isPlaceholderUuid(player.uuid) then
             local keep = true
-            if managed[name] == nil then
-                keep = not joinTracking or seenOnServer[name] == true
+            if managed[name] == nil or managed[name].uuid ~= player.uuid then
+                keep = not joinTracking or seenOnServer[player.uuid] == true
                 if keep and active == "bedwars" and not replay.on then keep = isBedwarsTeamPrefix(teamPrefixOf(name)) end
             end
             if keep then
@@ -1587,6 +1624,11 @@ local function overlayPlayers()
         local group = entry.teamName
         if active == "bedwars" and isBedwarsTeamPrefix(entry.prefix) then
             group = "letter:" .. starfish.text.plain(entry.prefix)
+        elseif replay.on then
+            -- A cut-off long name gets its own team in replays, so group by colour.
+            local color = nil
+            for code in (entry.prefix or ""):gmatch("§([0-9a-fA-F])") do color = code:lower() end
+            if color then group = "color:" .. color end
         end
         groupOf[entry] = group
         if groupOrder[group] == nil or entry.teamName < groupOrder[group] then groupOrder[group] = entry.teamName end
@@ -2052,8 +2094,10 @@ do
     }
 
     -- Living players' entries are held so a disconnect stays listed.
+    -- Not in replays: held entries outlived the replay and showed up again,
+    -- doubled, in the next one.
     function shouldProtect(name)
-        if active ~= "bedwars" or not game.started or not managed[name] then return false end
+        if replay.on or active ~= "bedwars" or not game.started or not managed[name] then return false end
         if game.disconnected[name] then return getConfig("keepDisconnected.enabled", true) == true end
         if game.eliminated[name] then return false end
         return true
@@ -2123,6 +2167,9 @@ do
         for _, player in ipairs(players) do
             if player.name then present[player.name] = true end
         end
+        -- Your own entry can be missing for a moment at the start.
+        local okMe, me = pcall(starfish.players.me)
+        if okMe and me and me.name then present[me.name] = true end
         for _, team in ipairs(teams) do
             -- Bed Wars team prefixes are a bold team letter, e.g. "§c§lR §r§c".
             if starfish.text.plain(team.prefix or ""):match("^%u%s+$") then
@@ -2140,8 +2187,10 @@ do
         end
     end
 
+    -- A replay can be paused or slowed while the countdown runs in real time, so
+    -- a player who isn't back yet hasn't disconnected there.
     local function confirmRespawned(name)
-        if game.respawns[name] or not known(name) then return end
+        if replay.on or game.respawns[name] or not known(name) then return end
         if not starfish.players.byName(name) then markDisconnected(name) end
     end
 
@@ -2195,20 +2244,20 @@ do
             return
         end
 
-        local reconnected = message:match("^([%w_]+) reconnected%.$")
+        local reconnected = replay.entryFor(message:match("^([%w_]+) reconnected%.$"))
         if reconnected and known(reconnected) then
             trackRespawn(reconnected, RECONNECT_RESPAWN_SECONDS)
             return
         end
 
-        local disconnected = message:match("^([%w_]+) disconnected%.")
+        local disconnected = replay.entryFor(message:match("^([%w_]+) disconnected%."))
         if disconnected and known(disconnected) then
             markDisconnected(disconnected)
             if message:sub(-11) == "FINAL KILL!" then markEliminated(disconnected) end
             return
         end
 
-        local subject = message:match("^([%w_]+) ")
+        local subject = replay.entryFor(message:match("^([%w_]+) "))
         if not subject or not known(subject) then return end
         if message:sub(-11) == "FINAL KILL!" then
             markEliminated(subject)
@@ -2318,9 +2367,15 @@ local function manage(name, uuid)
     local team = scoreboardTeamOf(name)
     trace("tracking " .. name .. " (uuid v" .. tostring(uuid):sub(15, 15)
         .. ", team " .. tostring(team and team.name) .. ", prefix " .. describe(teamPrefixOf(name)) .. ")")
-    managed[name] = { uuid = uuid }
+    managed[name] = { uuid = uuid, shown = replay.tabName(name), final = replay.nameFinal(name) }
+    if managed[name].shown ~= name then trace(name .. " is shown in tab as " .. managed[name].shown) end
     byUuid[uuid] = name
-    game.ghosts[name] = nil
+    if game.ghosts[name] then
+        -- Their entry just came late: not offline after all.
+        game.ghosts[name] = nil
+        game.disconnected[name] = nil
+        trace(name .. " is in the tab after all, no longer DC")
+    end
     requestStats(name)
     dirty = true
 end
@@ -2338,6 +2393,16 @@ local function trackTabList()
     for _, player in ipairs(players) do
         if player.name and player.uuid then
             manage(player.name, player.uuid)
+            local entry = managed[player.name]
+            if entry then
+                local shown, final = replay.tabName(player.name), replay.nameFinal(player.name)
+                if shown ~= entry.shown or final ~= entry.final then
+                    if shown ~= entry.shown then trace(player.name .. " is shown in tab as " .. shown) end
+                    entry.shown, entry.final = shown, final
+                    requestStats(player.name)
+                    dirty = true
+                end
+            end
         end
     end
 end
@@ -2408,10 +2473,14 @@ local TITLE_MODES = {
 
 local lastTitle = nil
 
--- In-game sidebars have a Map: or Mode: line; lobby sidebars don't.
+-- In-game sidebars have a Map: or Mode: line; lobby sidebars don't. A running
+-- Bed Wars game has neither, only team lines like "R Red: ✓".
 local function inGameByScoreboard()
     for _, text in ipairs(sidebarTexts() or {}) do
         if text:match("^Map:") or text:match("^Mode:") then return true end
+        if text:match("^%u%s+%a+:") and (text:find("✓", 1, true) or text:find("✗", 1, true) or text:match(":%s*%d+")) then
+            return true
+        end
     end
     return false
 end
@@ -2545,7 +2614,7 @@ starfish.events.on("session:join", function()
 end)
 
 starfish.events.on("player:join", function(event)
-    if event.name then seenOnServer[event.name] = true end
+    if event.uuid then seenOnServer[event.uuid] = true end
     if not tabActive or not event.name or not event.uuid then return end
     manage(event.name, event.uuid)
 end)
@@ -2558,7 +2627,9 @@ starfish.events.on("player:listUpdate", function(event)
     if not tabActive or event.action ~= "remove" then return end
     for _, entry in ipairs(event.players or {}) do
         local name = entry.uuid and byUuid[entry.uuid]
-        if name and not shouldProtect(name) then forget(name) end
+        -- Replays hold no entries, but living players stay tracked for their countdowns.
+        local keep = shouldProtect(name) or (replay.on and active == "bedwars" and not game.eliminated[name])
+        if name and not keep then forget(name) end
     end
 end)
 
