@@ -56,6 +56,8 @@ local locationKnown = false
 local locationMode = nil
 local locationDuelsMode = nil
 local replay = { on = false, loggedGame = nil, loggedViewers = {} }
+-- Real names announced by nicklookup:resolved, which avoids a dependency on that plugin.
+local nickData = { announced = {} }
 local lastPregame = nil
 
 local NICKED_STATS = { isNicked = true }
@@ -101,7 +103,7 @@ local function callPlugin(name, func, ...)
 end
 
 local function getRealName(name)
-    return callPlugin("denicker", "getRealName", name)
+    return callPlugin("denicker", "getRealName", name) or nickData.announced[name]
 end
 
 local function isNicked(name)
@@ -752,7 +754,12 @@ end
 
 local function requestStats(name, callback)
     local shown = replay.lookupName(name)
+    local entry = managed[name]
+    -- Nick Lookup uses these in replays, where nicks have no v1 UUID.
     local function done(st)
+        if st and st.isNicked and entry and replay.tabName(name) == shown and replay.nameFinal(name) then
+            pcall(starfish.events.emit, "tabstats:nicked", { name = shown, uuid = entry.uuid })
+        end
         if callback then callback(st) end
     end
 
@@ -2600,6 +2607,7 @@ end
 starfish.timers.interval(1000, detectTick)
 
 starfish.events.on("session:join", function()
+    nickData.announced = {}
     seenOnServer = {}
     joinTracking = true
     deactivate()
@@ -2617,6 +2625,16 @@ starfish.events.on("player:join", function(event)
     if event.uuid then seenOnServer[event.uuid] = true end
     if not tabActive or not event.name or not event.uuid then return end
     manage(event.name, event.uuid)
+end)
+
+-- Nick Lookup usually finds the real name after the nick was already marked as nicked.
+starfish.events.on("nicklookup:resolved", function(event)
+    if type(event) ~= "table" or not event.nickName then return end
+    if type(event.realName) == "string" and event.realName ~= "" then nickData.announced[event.nickName] = event.realName end
+    if not tabActive then return end
+    trace("nick lookup: " .. event.nickName .. " is " .. tostring(event.realName))
+    requestStats(event.nickName)
+    dirty = true
 end)
 
 starfish.events.on("team:update", function()
