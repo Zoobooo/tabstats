@@ -2,7 +2,7 @@ plugin = {
     name = "tabstats",
     displayName = "Tab Stats",
     prefix = "§dTS",
-    version = "1.0.2",
+    version = "1.0.4",
     author = "Zoobo",
     credits = "Zoobo",
     description = "Beta. Tab list stats for Bed Wars, SkyWars, Murder Mystery and Duels: overlay tab list, respawn timers, configurable columns. Needs your own Hypixel API key.",
@@ -56,8 +56,10 @@ local locationKnown = false
 local locationMode = nil
 local locationDuelsMode = nil
 local replay = { on = false, loggedGame = nil, loggedViewers = {} }
--- Real names announced by nicklookup:resolved, which avoids a dependency on that plugin.
-local nickData = { announced = {} }
+-- Real names announced by nicklookup:resolved (no dependency on that plugin needed),
+-- and stats other plugins handed over with tabstats:playerData, kept until the next
+-- server switch.
+local nickData = { announced = {}, kept = {} }
 local lastPregame = nil
 
 local NICKED_STATS = { isNicked = true }
@@ -683,7 +685,8 @@ end
 
 local function fetchStats(key, query, attempt)
     local cached = stats[key]
-    if cached and not cached.isLoading and cached.timestamp and os.time() - cached.timestamp < CACHE_TTL then
+    if cached and not cached.isLoading and cached.timestamp
+        and (os.time() - cached.timestamp < CACHE_TTL or nickData.kept[key]) then
         notifyFetched(key)
         return
     end
@@ -2607,7 +2610,7 @@ end
 starfish.timers.interval(1000, detectTick)
 
 starfish.events.on("session:join", function()
-    nickData.announced = {}
+    nickData.announced, nickData.kept = {}, {}
     seenOnServer = {}
     joinTracking = true
     deactivate()
@@ -2634,6 +2637,20 @@ starfish.events.on("nicklookup:resolved", function(event)
     if not tabActive then return end
     trace("nick lookup: " .. event.nickName .. " is " .. tostring(event.realName))
     requestStats(event.nickName)
+    dirty = true
+end)
+
+-- Hypixel player data from another plugin; player = nil means no Hypixel profile.
+starfish.events.on("tabstats:playerData", function(event)
+    if type(event) ~= "table" or type(event.name) ~= "string" or event.name == "" then return end
+    local key = event.name:lower()
+    if type(event.player) == "table" then
+        stats[key] = parsePlayer(event.player)
+    else
+        stats[key] = { isNicked = true, timestamp = os.time() }
+    end
+    nickData.kept[key] = true
+    trace("player data handed over for " .. event.name .. (type(event.player) == "table" and "" or " (no profile)"))
     dirty = true
 end)
 
