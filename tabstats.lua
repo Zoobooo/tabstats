@@ -1581,10 +1581,18 @@ end
 local function overlayPlayers()
     local players, viewers = gameEntries()
 
+    -- Hypixel takes a disconnected player out of their team, so anyone with a
+    -- countdown or DC keeps the last team they had.
+    local function rowTeam(name)
+        local team = scoreboardTeamOf(name)
+        if not team and managed[name] and statusText(name) then team = managed[name].lastTeam end
+        return team
+    end
+
     local list = {}
     for _, player in ipairs(players) do
         if player.name and player.uuid and not isPlaceholderUuid(player.uuid) then
-            local team = scoreboardTeamOf(player.name)
+            local team = rowTeam(player.name)
             list[#list + 1] = {
                 name = player.name,
                 uuid = player.uuid,
@@ -1603,7 +1611,7 @@ local function overlayPlayers()
     for name, entry in pairs(managed) do
         local snapshot = entry.snapshot
         if not present[name] and snapshot and statusText(name) then
-            local team = scoreboardTeamOf(name)
+            local team = rowTeam(name)
             list[#list + 1] = {
                 name = name,
                 uuid = entry.uuid,
@@ -2122,6 +2130,8 @@ do
             end
             local okPlayer, player = pcall(starfish.players.byName, name)
             if okPlayer and player then entry.snapshot = player end
+            local team = scoreboardTeamOf(name)
+            if team then entry.lastTeam = { name = team.name, prefix = team.prefix, suffix = team.suffix } end
         end
     end
 
