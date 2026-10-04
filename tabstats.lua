@@ -1451,7 +1451,9 @@ do
             end
             if not textures or not textures.value then return nil end
             local decoded = starfish.base64.decode(textures.value)
-            return decoded and decoded:match('"SKIN"%s*:%s*{%s*"url"%s*:%s*"([^"]+)"')
+            -- Old Hypixel nick skins list "metadata" before "url" inside SKIN.
+            local skin = decoded and decoded:match('"SKIN"%s*:%s*(%b{})')
+            return skin and skin:match('"url"%s*:%s*"([^"]+)"')
         end)
         if ok and url then return url end
         local name = player and player.name
