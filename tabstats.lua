@@ -1417,6 +1417,28 @@ do
         return table.concat(faceRows, "", 0, 7)
     end
 
+    local noSkinLogged = {}
+
+    -- Head for players without skin data: the font's "?" at double size, centred
+    -- in a 16x16 grid (3 free columns each side, 1 free row top and bottom).
+    local QUESTION_MARK = { ".XXX.", "X...X", "....X", "...X.", "..X..", ".....", "..X.." }
+
+    local function questionHeadPixels()
+        local cell = HEAD_TEXTURE_SIZE // 16
+        local background, red = string.char(60, 60, 60, 255), string.char(255, 85, 85, 255)
+        local rows = {}
+        for y = 0, 15 do
+            local row = {}
+            for x = 0, 15 do
+                local gx, gy = (x - 3) // 2, (y - 1) // 2
+                local line = gx >= 0 and gx < 5 and gy >= 0 and QUESTION_MARK[gy + 1]
+                row[x + 1] = ((line and line:sub(gx + 1, gx + 1) == "X") and red or background):rep(cell)
+            end
+            rows[y + 1] = table.concat(row):rep(cell)
+        end
+        return table.concat(rows)
+    end
+
     function skinUrlOf(player)
         local ok, url = pcall(function()
             local properties = player and player.properties
@@ -1431,7 +1453,13 @@ do
             local decoded = starfish.base64.decode(textures.value)
             return decoded and decoded:match('"SKIN"%s*:%s*{%s*"url"%s*:%s*"([^"]+)"')
         end)
-        return ok and url or nil
+        if ok and url then return url end
+        local name = player and player.name
+        if name and not noSkinLogged[name] then
+            noSkinLogged[name] = true
+            trace("no skin for " .. name .. ", showing a ? head")
+        end
+        return nil
     end
 
     local heads = { textures = {}, pending = {}, requested = {} }
@@ -1459,6 +1487,7 @@ do
         if not url then return nil end
         local texture = heads.textures[url]
         if texture then return texture end
+        if url == "?" and not heads.pending[url] then heads.pending[url] = questionHeadPixels() end
         local pixels = heads.pending[url]
         if pixels then
             heads.pending[url] = nil
@@ -1863,7 +1892,7 @@ local function drawOverlay()
         for colIndex, cell in ipairs(layout.placed) do
             local x = tableX + cell.x
             if cell.column.isName then
-                local texture = headTexture(skinUrlOf(entry.player))
+                local texture = headTexture(skinUrlOf(entry.player) or "?")
                 if texture then
                     starfish.overlay.texture({ anchor = TOP_LEFT, x = originX + x * scale, y = originY + capTop * scale,
                         w = LAYOUT.head * scale, h = LAYOUT.head * scale, texture = texture })
