@@ -57,9 +57,9 @@ local locationMode = nil
 local locationDuelsMode = nil
 local replay = { on = false, loggedGame = nil, loggedViewers = {} }
 -- Real names announced by nicklookup:resolved (no dependency on that plugin needed),
--- and stats other plugins handed over with tabstats:playerData, kept until the next
--- server switch.
-local nickData = { announced = {}, kept = {} }
+-- stats other plugins handed over with tabstats:playerData and head skins from
+-- tabstats:headSkin, kept until the next server switch.
+local nickData = { announced = {}, kept = {}, heads = {} }
 local lastPregame = nil
 
 local NICKED_STATS = { isNicked = true }
@@ -1894,7 +1894,10 @@ local function drawOverlay()
         for colIndex, cell in ipairs(layout.placed) do
             local x = tableX + cell.x
             if cell.column.isName then
-                local texture = headTexture(skinUrlOf(entry.player) or "?")
+                -- A head skin from another plugin is used once it has loaded.
+                local handed = nickData.heads[replay.lookupName(entry.name)] or nickData.heads[entry.name]
+                local texture = handed and headTexture(handed)
+                if not texture then texture = headTexture(skinUrlOf(entry.player) or "?") end
                 if texture then
                     starfish.overlay.texture({ anchor = TOP_LEFT, x = originX + x * scale, y = originY + capTop * scale,
                         w = LAYOUT.head * scale, h = LAYOUT.head * scale, texture = texture })
@@ -2651,7 +2654,7 @@ end
 starfish.timers.interval(1000, detectTick)
 
 starfish.events.on("session:join", function()
-    nickData.announced, nickData.kept = {}, {}
+    nickData.announced, nickData.kept, nickData.heads = {}, {}, {}
     seenOnServer = {}
     joinTracking = true
     deactivate()
@@ -2693,6 +2696,16 @@ starfish.events.on("tabstats:playerData", function(event)
     nickData.kept[key] = true
     trace("player data handed over for " .. event.name .. (type(event.player) == "table" and "" or " (no profile)"))
     dirty = true
+end)
+
+-- Another plugin can set the skin a row's head is cut from; url = nil clears it.
+starfish.events.on("tabstats:headSkin", function(event)
+    if type(event) ~= "table" or type(event.name) ~= "string" or event.name == "" then return end
+    local url = type(event.url) == "string" and event.url ~= "" and event.url or nil
+    nickData.heads[event.name] = url
+    trace("head skin for " .. event.name .. (url and " handed over" or " cleared"))
+    dirty = true
+    pcall(starfish.overlay.invalidate)
 end)
 
 starfish.events.on("team:update", function()
