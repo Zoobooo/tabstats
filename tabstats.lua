@@ -51,7 +51,13 @@ local dirty = false
 local layoutCache = nil
 local lastHeader = nil
 local warnedOverlap = false
-local warnedNoKey = false
+-- Chat warnings when stats or nick detection can't be trusted, once per cause per game.
+local notices = { shown = {} }
+function notices.warn(cause, message)
+    if notices.shown[cause] then return end
+    notices.shown[cause] = true
+    starfish.chat.warning("Tab Stats: " .. message)
+end
 local locationKnown = false
 local locationMode = nil
 local locationDuelsMode = nil
@@ -697,10 +703,8 @@ local function fetchStats(key, query, attempt)
 
     local apiKey = hypixelApiKey()
     if not apiKey then
-        if not warnedNoKey then
-            warnedNoKey = true
-            starfish.log.warn("No Hypixel API key set - stats stay hidden until one is added in the Tab Stats settings")
-        end
+        notices.warn("nokey", "no Hypixel API key set. Stats are hidden and nicks whose name exists on Mojang"
+            .. " can't be detected. Add a key in the Tab Stats settings.")
         stats[key] = { fetchError = "no Hypixel API key set" }
         notifyFetched(key)
         return
@@ -746,6 +750,8 @@ local function fetchStats(key, query, attempt)
                 notifyFetched(key)
             elseif res.status == 403 then
                 starfish.log.warn("Stats for " .. query .. " failed: " .. describeError(res))
+                notices.warn("badkey", "Hypixel rejected your API key. Stats are missing and nicks whose name exists"
+                    .. " on Mojang can't be detected. Make a new key at developer.hypixel.net.")
                 stats[key] = { fetchError = describeError(res) }
                 notifyFetched(key)
             else
@@ -2654,6 +2660,7 @@ end
 starfish.timers.interval(1000, detectTick)
 
 starfish.events.on("session:join", function()
+    notices.shown = {}
     nickData.announced, nickData.kept, nickData.heads = {}, {}, {}
     seenOnServer = {}
     joinTracking = true
