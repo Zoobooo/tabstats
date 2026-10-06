@@ -2688,11 +2688,18 @@ starfish.events.on("player:join", function(event)
 end)
 
 -- Nick Lookup usually finds the real name after the nick was already marked as nicked.
+-- currentName is the player's name now when they renamed since, realUuid their account.
 starfish.events.on("nicklookup:resolved", function(event)
     if type(event) ~= "table" or not event.nickName then return end
-    if type(event.realName) == "string" and event.realName ~= "" then nickData.announced[event.nickName] = event.realName end
+    local current = type(event.currentName) == "string" and event.currentName ~= "" and event.currentName or nil
+    local name = current or event.realName
+    if type(name) == "string" and name ~= "" then
+        nickData.announced[event.nickName] = name
+        if type(event.realUuid) == "string" and event.realUuid ~= "" then uuidCache[name:lower()] = event.realUuid end
+    end
     if not tabActive then return end
-    trace("nick lookup: " .. event.nickName .. " is " .. tostring(event.realName))
+    trace("nick lookup: " .. event.nickName .. " is " .. tostring(event.realName)
+        .. (current and current ~= event.realName and (", now " .. current) or ""))
     requestStats(event.nickName)
     dirty = true
 end)
