@@ -720,6 +720,12 @@ local function fetchStats(key, query, attempt)
             end)
         else
             starfish.log.warn("Stats for " .. query .. " failed: " .. message)
+            if message == "UUID lookup failed" then
+                notices.warn("mojang", "Mojang name lookups are failing. Some stats are missing and nicks may be missed.")
+            else
+                notices.warn("hypixel", "Hypixel lookups are failing (" .. message .. "). Some stats are missing and"
+                    .. " nicks may be missed.")
+            end
             stats[key] = { fetchError = message }
             notifyFetched(key)
         end
