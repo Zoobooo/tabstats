@@ -2,7 +2,7 @@ plugin = {
     name = "tabstats",
     displayName = "Tab Stats",
     prefix = "§dTS",
-    version = "1.0.7",
+    version = "1.0.8",
     author = "Zoobo",
     credits = "Zoobo",
     description = "Beta. Tab list stats for Bed Wars, SkyWars, Murder Mystery and Duels: overlay tab list, respawn timers, configurable columns. Needs your own Hypixel API key.",
@@ -674,22 +674,22 @@ local function notifyFetched(key)
 end
 
 -- Tab-list UUIDs are real (v4); anything else goes through Mojang, and a name
--- Mojang doesn't know is a nick.
+-- Mojang doesn't know is a nick. callback(uuid, notFound, fromTab).
 local function resolveUuid(query, callback)
     local cacheKey = query:lower()
+    local player = starfish.players.byName(query)
+    if player and player.uuid and player.uuid:sub(15, 15) == "4" then
+        uuidCache[cacheKey] = player.uuid
+        callback(player.uuid, false, true)
+        return
+    end
+
     local cached = uuidCache[cacheKey]
     if cached == false then
         callback(nil, true)
         return
     elseif cached then
         callback(cached)
-        return
-    end
-
-    local player = starfish.players.byName(query)
-    if player and player.uuid and player.uuid:sub(15, 15) == "4" then
-        uuidCache[cacheKey] = player.uuid
-        callback(player.uuid)
         return
     end
 
@@ -714,7 +714,8 @@ local function describeError(res)
     return cause or res.error or ("HTTP " .. tostring(res.status or "?"))
 end
 
-local function fetchStats(key, query, attempt)
+-- byShownName: query is the name in the tab, not a real name another plugin found.
+local function fetchStats(key, query, attempt, byShownName)
     local cached = stats[key]
     if cached and not cached.isLoading and cached.timestamp
         and (os.time() - cached.timestamp < CACHE_TTL or nickData.kept[key]) then
@@ -741,7 +742,7 @@ local function fetchStats(key, query, attempt)
         local tries = attempt or 1
         if tries < FETCH_RETRIES then
             starfish.timers.delay(math.floor(RETRY_BASE_MS * 2 ^ (tries - 1)), function()
-                fetchStats(key, query, tries + 1)
+                fetchStats(key, query, tries + 1, byShownName)
             end)
         else
             starfish.log.warn("Stats for " .. query .. " failed: " .. message)
@@ -756,7 +757,7 @@ local function fetchStats(key, query, attempt)
         end
     end
 
-    resolveUuid(query, function(uuid, notFound)
+    resolveUuid(query, function(uuid, notFound, fromTab)
         if notFound then
             stats[key] = { isNicked = true, timestamp = os.time() }
             notifyFetched(key)
@@ -773,7 +774,14 @@ local function fetchStats(key, query, attempt)
             headers = { ["API-Key"] = apiKey }
         }, function(res)
             local data = type(res.data) == "table" and res.data or nil
-            if res.success and data and data.player then
+            local listed = res.success and data and type(data.player) == "table" and data.player.displayname
+            if byShownName and not fromTab and type(listed) == "string" and listed:lower() ~= query:lower() then
+                -- Hypixel renames a profile when its player logs in. Listed under another name means
+                -- the account hasn't been online since taking this name, so whoever uses it is nicked.
+                trace(query .. ": Hypixel lists this account as " .. listed .. ", so " .. query .. " is a nick")
+                stats[key] = { isNicked = true, timestamp = os.time() }
+                notifyFetched(key)
+            elseif res.success and data and data.player then
                 stats[key] = parsePlayer(data.player)
                 notifyFetched(key)
             elseif res.success and data and data.player == nil then
@@ -814,7 +822,7 @@ local function requestStats(name, callback)
     fetchCallbacks[key] = fetchCallbacks[key] or {}
     table.insert(fetchCallbacks[key], done)
 
-    fetchStats(key, query)
+    fetchStats(key, query, nil, realName == nil)
 end
 
 local function statsFor(name)
