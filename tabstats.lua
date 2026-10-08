@@ -544,9 +544,14 @@ local function registerSchema()
         description = "Stats come straight from the Hypixel API with your own key (developer.hypixel.net).",
         settings = {
             { key = "stats.apiKey", type = "text", default = "", description = "Your Hypixel API key. Required for any stats to show." },
-            { key = "stats.headerLabels", type = "toggle", default = true, description = "Show column labels in the tab list header (Tab list style)." },
         }
     })
+
+    -- Starfish turns the first toggle of a section into the section's unlabeled header
+    -- switch, so every toggle that isn't a section's own on/off switch gets its own section.
+    local function toggleSection(key, label, setting)
+        starfish.schema.section({ key = key, label = label, description = setting.description, settings = { setting } })
+    end
 
     starfish.schema.section({
         key = "tab",
@@ -558,19 +563,18 @@ local function registerSchema()
                 { text = "Tab list", value = "tablist" }
             }},
             { key = "tab.scale", type = "cycle", default = DEFAULT_SCALE, displayLabel = "Size", description = "Overlay size, the same at any resolution. 75% is close to the vanilla tab list.", values = SCALE_VALUES },
-            { key = "tab.grayOwnTeam", type = "toggle", default = false, displayLabel = "Gray Own Team", description = "Render your own team's stats in gray to de-emphasize them." },
-            { key = "tab.replays", type = "toggle", default = true, displayLabel = "Show in Replays", description = "Also show tab stats while watching a Hypixel replay (/replay)." },
         }
     })
 
-    starfish.schema.section({
-        key = "diagnostics",
-        label = "Diagnostics",
-        description = "Troubleshooting.",
-        settings = {
-            { key = "diagnostics.logFile", type = "toggle", default = false, displayLabel = "Debug Log File", description = "Write a debug log to %TEMP%\\tabstats-debug.log." },
-        }
-    })
+    toggleSection("grayOwnTeam", "Gray Own Team",
+        { key = "tab.grayOwnTeam", type = "toggle", default = false, description = "Render your own team's stats in gray to de-emphasize them." })
+    toggleSection("replays", "Show in Replays",
+        { key = "tab.replays", type = "toggle", default = true, description = "Also show tab stats while watching a Hypixel replay (/replay)." })
+    toggleSection("headerLabels", "Column Labels",
+        { key = "stats.headerLabels", type = "toggle", default = true, description = "Show column labels in the tab list header (Tab list style)." })
+
+    toggleSection("diagnostics", "Debug Log File",
+        { key = "diagnostics.logFile", type = "toggle", default = false, description = "Write a debug log to %TEMP%\\tabstats-debug.log." })
 
     starfish.schema.section({
         key = "respawnTimer",
