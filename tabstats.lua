@@ -566,6 +566,8 @@ local function registerSchema()
         }
     })
 
+    toggleSection("textShadow", "Text Shadow",
+        { key = "tab.textShadow", type = "toggle", default = true, description = "Draw the overlay text with a shadow, like Minecraft's own text." })
     toggleSection("grayOwnTeam", "Gray Own Team",
         { key = "tab.grayOwnTeam", type = "toggle", default = false, description = "Render your own team's stats in gray to de-emphasize them." })
     toggleSection("replays", "Show in Replays",
@@ -1904,8 +1906,9 @@ local function drawOverlay()
     local function rect(x, y, w, h, color)
         starfish.overlay.rect({ anchor = TOP_LEFT, x = originX + x * scale, y = originY + y * scale, w = w * scale, h = h * scale, color = color })
     end
+    local shadow = getConfig("tab.textShadow", true)
     local function text(value, x, capTop)
-        starfish.overlay.textColored({ anchor = TOP_LEFT, x = originX + x * scale, y = originY + (capTop - GLYPH_TOP) * scale, text = value, size = size, color = TEXT_BASE_COLOR })
+        starfish.overlay.textColored({ anchor = TOP_LEFT, x = originX + x * scale, y = originY + (capTop - GLYPH_TOP) * scale, text = value, size = size, color = TEXT_BASE_COLOR, shadow = shadow })
     end
     local function centered(value, x, w, capTop)
         text(value, x + (w - measure(value)) / 2, capTop)
