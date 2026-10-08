@@ -2790,37 +2790,6 @@ plugin.onDisable = function()
     unbindTab()
 end
 
-starfish.commands.register("stats", {
-    description = "Show a player's stats for the mode you are in",
-    arguments = {
-        { name = "player", type = "string", optional = true, description = "Player name to look up" }
-    }
-}, function(ctx)
-    local name = ctx.args and ctx.args.player
-    if not name or name == "" then
-        starfish.chat.error("Usage: /tabstats stats <player>")
-        return
-    end
-    if not active then
-        starfish.chat.error("Not in a Bed Wars, SkyWars, Murder Mystery or Duels game.")
-        return
-    end
-
-    requestStats(name, function(st)
-        if not st or statsUnavailable(st) then
-            starfish.chat.error(name .. " - stats unavailable")
-            return
-        end
-        local parts = {}
-        for _, column in ipairs(columns()) do
-            if not column.isName then
-                table.insert(parts, "§7" .. column.header .. " " .. column.value(st))
-            end
-        end
-        starfish.chat.info("§f" .. name .. " §8- §r" .. table.concat(parts, "  "))
-    end)
-end)
-
 local restored = callPlugin("hypixel-mod-api", "getLocation")
 trace("plugin loaded, restored location: " .. describe(restored))
 if restored and restored.serverType then
