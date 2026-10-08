@@ -1605,6 +1605,12 @@ local function overlayUsable()
         trace(usable and "overlay renderer attached - Tab shows the overlay"
             or ("overlay renderer not attached (supported: " .. tostring(okSupported and supported)
                 .. ", viewport: " .. tostring(width) .. "x" .. tostring(height) .. ") - stats go into the normal tab list"))
+        -- Said in chat once per plugin load: only a restart brings the renderer back.
+        if not usable and not overlay.unavailableWarned then
+            overlay.unavailableWarned = true
+            starfish.chat.warning("Tab Stats: the overlay isn't available (this happens after Starfish reloads the plugin). Showing stats in"
+                .. " the normal tab list. Restart Starfish and re-inject to get the overlay back.")
+        end
     end
     return usable
 end
