@@ -1905,6 +1905,11 @@ local function drawOverlay()
     end
 
     local layout = overlayLayout(measure)
+    -- Wider than the screen (long names at a big Size): shrink just enough to fit.
+    if layout.width * scale > viewportWidth then
+        scale = viewportWidth / layout.width
+        size = TEXT_SIZE_PER_UNIT * scale
+    end
     if not overlay.loggedDraw then
         overlay.loggedDraw = true
         trace(string.format("overlay drawn: %d rows, %.0fx%.0f viewport, %.2f px/u", #layout.list, viewportWidth, viewportHeight, scale))
