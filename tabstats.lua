@@ -2146,7 +2146,7 @@ local function clearDecorations()
         starfish.display.clearSuffix(entry.uuid)
         if entry.held then pcall(starfish.display.releaseRemoval, entry.uuid) end
     end
-    starfish.display.clearTabHeaderAppend()
+    starfish.display.clearTabHeader()
     managed = {}
     byUuid = {}
     lastApplied = {}
@@ -2159,7 +2159,7 @@ local function clearRowDecorations()
         starfish.display.clearPrefix(entry.uuid)
         starfish.display.clearSuffix(entry.uuid)
     end
-    starfish.display.clearTabHeaderAppend()
+    starfish.display.clearTabHeader()
     lastApplied = {}
     lastHeader = nil
     layoutCache = nil
@@ -2463,10 +2463,11 @@ local function refresh()
     end
     if header ~= lastHeader then
         lastHeader = header
-        if header then
-            starfish.display.setTabHeaderAppend(header)
+        if not header then
+            starfish.display.clearTabHeader()
         else
-            starfish.display.clearTabHeaderAppend()
+            -- Plugin text comes right after the server's header, so the line break is ours.
+            starfish.display.setTabHeader("\n" .. header)
         end
     end
 
