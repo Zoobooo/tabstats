@@ -558,11 +558,11 @@ local function registerSchema()
         label = "Tab list",
         description = "How the stats are shown while you hold Tab in a game.",
         settings = {
-            { key = "tab.style", type = "cycle", default = "overlay", displayLabel = "Style", description = "Overlay draws its own tab list (stars, heads, stat columns, HP). Tab list writes the stats into the normal tab list instead.", values = {
+            { key = "tab.style", type = "cycle", default = "overlay", label = "Style", description = "Overlay draws its own tab list (stars, heads, stat columns, HP). Tab list writes the stats into the normal tab list instead.", values = {
                 { text = "Overlay", value = "overlay" },
                 { text = "Tab list", value = "tablist" }
             }},
-            { key = "tab.scale", type = "cycle", default = DEFAULT_SCALE, displayLabel = "Size", description = "Overlay size, the same at any resolution. 75% is close to the vanilla tab list.", values = SCALE_VALUES },
+            { key = "tab.scale", type = "cycle", default = DEFAULT_SCALE, label = "Size", description = "Overlay size, the same at any resolution. 75% is close to the vanilla tab list.", values = SCALE_VALUES },
         }
     })
 
@@ -584,7 +584,7 @@ local function registerSchema()
         description = "Bed Wars: show a respawn countdown in an extra column on the right while a player is dead.",
         settings = {
             { key = "respawnTimer.enabled", type = "toggle", default = true, description = "Show a respawn countdown while a player is dead." },
-            { key = "keepDisconnected.enabled", type = "toggle", default = true, displayLabel = "Keep Disconnected", description = "Keep a disconnected player's tab entry visible, marked DC, until they reconnect." },
+            { key = "keepDisconnected.enabled", type = "toggle", default = true, label = "Keep Disconnected", description = "Keep a disconnected player's tab entry visible, marked DC, until they reconnect." },
         }
     })
 
@@ -602,7 +602,7 @@ local function registerSchema()
             local settings = {}
             for index, default in ipairs(mode.slots) do
                 settings[#settings + 1] = { key = slotKey(mode, index), type = "cycle", default = default,
-                    displayLabel = "Column " .. index, values = slotValues(mode),
+                    label = "Column " .. index, values = slotValues(mode),
                     description = "What column " .. index .. " shows in " .. mode.label .. "." }
             end
             starfish.schema.section({
