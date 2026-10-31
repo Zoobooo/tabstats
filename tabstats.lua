@@ -5,7 +5,7 @@ plugin = {
     version = "1.0.10",
     author = "Zoobo",
     credits = "Zoobo",
-    description = "Beta. Tab list stats for Bed Wars, SkyWars, Murder Mystery and Duels: overlay tab list, respawn timers, configurable columns. Needs your own Hypixel API key.",
+    description = "Beta. Tab stats for Bed Wars, SkyWars, Murder Mystery and Duels. Needs your own Hypixel API key.",
     readme = [[
 ## Nicks
 
