@@ -6,6 +6,7 @@ plugin = {
     author = "Zoobo",
     credits = "Zoobo",
     description = "Beta. Tab stats for Bed Wars, SkyWars, Murder Mystery and Duels. Needs your own Hypixel API key.",
+    minStarfishVersion = "0.1.0-beta.16",
     readme = [[
 ## Nicks
 
@@ -1561,8 +1562,8 @@ end
 
 local TAB_KEY = "TAB"
 local REFERENCE_UNITS_PER_HEIGHT = 440 -- the reference is 1057px tall at 2.4px per u
-local TEXT_SIZE_PER_UNIT = 12          -- mctext draws one Minecraft pixel as size/12
-local GLYPH_TOP = 2                    -- and a capital's top 2u below the text y
+local TEXT_SIZE_PER_UNIT = 8           -- size is the height of the game font's 8-pixel cell
+local GLYPH_TOP = 0                    -- and a capital starts at the top of that cell
 
 local LAYOUT = {
     top = 10,
@@ -1892,11 +1893,13 @@ local function drawOverlay()
         overlay.measuredScale = scale
     end
     local function measure(text)
-        local plain = starfish.text.plain(text or "")
-        local cached = overlay.measured[plain]
+        text = text or ""
+        local cached = overlay.measured[text]
         if not cached then
-            cached = (starfish.overlay.measureText(plain, size)) / scale
-            overlay.measured[plain] = cached
+            local plain = starfish.text.plain(text)
+            -- measureText gets plain text, so bold's extra pixel per glyph is added here.
+            cached = (starfish.overlay.measureText(plain, size)) / scale + textWidth(text) - textWidth(plain)
+            overlay.measured[text] = cached
         end
         return cached
     end
