@@ -2554,7 +2554,8 @@ local function applyLocation(loc)
     local mode = modeFor(loc.serverType)
     locationKnown = true
     -- Some modes send no mode string, so any non-lobby server counts.
-    local inGame = loc.lobbyName == nil
+    -- Bed Wars practice is a solo training server, not a game.
+    local inGame = loc.lobbyName == nil and loc.mode ~= "BEDWARS_PRACTICE"
     local nextMode = inGame and mode or nil
 
     trace("location " .. describe(loc) .. " -> " .. tostring(nextMode))
@@ -2612,6 +2613,7 @@ local function detectFromScoreboard()
         trace("scoreboard title: " .. tostring(title) .. " inGame=" .. tostring(inGameByScoreboard()))
     end
     if not title or not inGameByScoreboard() then return nil end
+    if title:find("PRACTICE", 1, true) then return nil end
 
     for needle, mode in pairs(TITLE_MODES) do
         if title:find(needle, 1, true) then return mode end
