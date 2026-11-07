@@ -924,10 +924,14 @@ function replay.isMe(player)
     return ok and me and me.uuid ~= nil and me.uuid == player.uuid
 end
 
-function replay.isViewer(player)
+-- Teams go by name, so when a recorded player is also watching, Hypixel puts
+-- the name on the viewer team and both entries get the "[Viewer]" prefix.
+-- watchingNames holds the names that have a non-recorded (viewer) entry.
+function replay.isViewer(player, watchingNames)
     if not replay.on then return false end
     if replay.isMe(player) then return true end
     if type(player.uuid) == "string" and player.uuid:sub(15, 15) ~= "2" then return true end
+    if watchingNames and watchingNames[player.name] then return false end
     local shown = starfish.text.plain(teamPrefixOf(player.name) .. (player.displayName or ""))
     return shown:find("[Viewer]", 1, true) ~= nil
 end
@@ -1035,9 +1039,17 @@ function gameEntries()
     local ok, players = pcall(starfish.players.all)
     if not ok or not players then return {} end
     local list, ignored, viewers = {}, {}, {}
+    local watchingNames = {}
+    if replay.on then
+        for _, player in ipairs(players) do
+            if player.name and type(player.uuid) == "string" and player.uuid:sub(15, 15) ~= "2" then
+                watchingNames[player.name] = true
+            end
+        end
+    end
     for _, player in ipairs(players) do
         local name = player.name
-        local viewer = name and player.uuid and replay.isViewer(player)
+        local viewer = name and player.uuid and replay.isViewer(player, watchingNames)
         if viewer then
             -- Your own replay lists you twice, as the recorded player and as a viewer.
             if replay.isMe(player) or not joinTracking or seenOnServer[player.uuid] == true then
@@ -1673,6 +1685,10 @@ local function overlayPlayers()
     -- countdown or DC keeps the last team they had.
     local function rowTeam(name)
         local team = scoreboardTeamOf(name)
+        -- A recorded player who is also watching has the viewer team, not theirs.
+        if team and replay.on and starfish.text.plain(team.prefix or ""):find("[Viewer]", 1, true) then
+            return { name = "", prefix = "", suffix = "" }
+        end
         if not team and managed[name] and statusText(name) then team = managed[name].lastTeam end
         return team
     end
