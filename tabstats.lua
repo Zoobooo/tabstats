@@ -838,8 +838,9 @@ local function statsFor(name)
     return stats[(realName or shown):lower()]
 end
 
-local function displayNameOf(name)
-    local player = starfish.players.byName(name)
+-- In replays a recorded player and a viewer can share a name, so look up the entry itself.
+local function displayNameOf(name, uuid)
+    local player = (uuid and replay.on and starfish.players.byUuid(uuid)) or starfish.players.byName(name)
     return (player and player.displayName) or name
 end
 
@@ -943,21 +944,27 @@ local function isObfuscatedEntry(name)
     return shown:find("§k", 1, true) ~= nil
 end
 
-local function teamPrefixWidth(name)
+-- Teams go by name, but in replays a recorded player who also watches has the
+-- viewer team, and the tab draws each entry its own way: ask Starfish per entry.
+local function teamPrefixWidth(name, uuid)
+    if uuid and replay.on then
+        local ok, prefix = pcall(starfish.display.teamPrefix, uuid)
+        if ok and type(prefix) == "string" then return textWidth(prefix) end
+    end
     return textWidth(teamPrefixOf(name))
 end
 
 local function computeMaxTeamPrefixWidth()
     local maxWidth = 0
-    for name in pairs(managed) do
-        local width = teamPrefixWidth(name)
+    for name, entry in pairs(managed) do
+        local width = teamPrefixWidth(name, entry.uuid)
         if width > maxWidth then maxWidth = width end
     end
     return maxWidth
 end
 
 local function nameColumnWidth(name, uuid)
-    return textWidth(displayNameOf(name))
+    return textWidth(displayNameOf(name, uuid))
         + textWidth(starfish.display.othersPrefix(uuid))
         + textWidth(starfish.display.othersSuffix(uuid))
 end
@@ -1125,7 +1132,7 @@ end
 local function buildRow(name, uuid, layout)
     local prefix, suffix = {}, {}
     local parts = prefix
-    local x = teamPrefixWidth(name)
+    local x = teamPrefixWidth(name, uuid)
 
     local function padTo(target)
         local pad, width = padding(target - x)
@@ -2498,6 +2505,9 @@ local function refresh()
 end
 
 local function manage(name, uuid)
+    -- In replays only the recorded entries (v2) are players; a viewer can have
+    -- the same name and must not take their stats.
+    if replay.on and tostring(uuid):sub(15, 15) ~= "2" then return end
     if managed[name] then return end
     if isObfuscatedEntry(name) then return end
     local team = scoreboardTeamOf(name)
