@@ -1,7 +1,7 @@
 {
   "name": "tabstats",
   "display_name": "Tab Stats",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Beta. Tab stats for Bed Wars, SkyWars, Murder Mystery and Duels. Needs your own Hypixel API key.",
   "prefix": "§dTS",
   "homepage": null,
