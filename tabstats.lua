@@ -2600,6 +2600,51 @@ starfish.events.on("hypixel:location", function(event)
     applyLocation(event.location)
 end)
 
+-- Hypixel only sends the location on a server switch, so after injecting
+-- mid-game it is unknown until the next one. Ask with /locraw and hide the reply.
+do
+    local LOCRAW_TIMEOUT_MS = 5000
+    local pending = nil
+
+    function notices.checkLocation(reason)
+        if locationKnown or pending then return end
+        local ok, err = pcall(starfish.chat.sendToServer, "/locraw")
+        trace("location unknown (" .. reason .. "), asking Hypixel with /locraw"
+            .. (ok and "" or (": sending failed: " .. tostring(err))))
+        if not ok then return end
+        pending = starfish.timers.delay(LOCRAW_TIMEOUT_MS, function()
+            pending = nil
+            if locationKnown then return end
+            trace("no /locraw reply after " .. LOCRAW_TIMEOUT_MS .. " ms")
+            local okMe, me = pcall(starfish.players.me)
+            if okMe and me then
+                notices.warn("locraw", "couldn't find out which game you're in (Hypixel didn't answer /locraw)."
+                    .. " Stats start at your next server switch.")
+            end
+        end)
+    end
+
+    starfish.chat.onReceive(function(message)
+        if not pending then return end
+        local text = starfish.text.plain(message.legacy or "")
+        if not text:match('^%s*{.*"server"%s*:') then return end
+        local ok, data = pcall(starfish.json.decode, text)
+        if not ok or type(data) ~= "table" then return end
+        message:cancel()
+        pcall(function() pending:off() end)
+        pending = nil
+        trace("/locraw reply: " .. text)
+        -- A location event that came first is newer.
+        if locationKnown then return end
+        applyLocation({ serverType = data.gametype, mode = data.mode, map = data.map,
+            lobbyName = data.lobbyname, serverName = data.server })
+    end)
+
+    starfish.events.on("session:attached", function()
+        notices.checkLocation("Starfish attached")
+    end)
+end
+
 local TITLE_MODES = {
     ["BED WARS"] = "bedwars",
     ["SKYWARS"] = "skywars",
@@ -2833,4 +2878,6 @@ local restored = callPlugin("hypixel-mod-api", "getLocation")
 trace("plugin loaded, restored location: " .. describe(restored))
 if restored and restored.serverType then
     applyLocation(restored)
+else
+    notices.checkLocation("plugin loaded")
 end
