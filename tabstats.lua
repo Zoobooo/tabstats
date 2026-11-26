@@ -690,18 +690,25 @@ local function resolveUuid(query, callback)
         return
     end
 
-    starfish.http.get(MOJANG_PROFILE_API .. starfish.http.encodeUri(query), function(res)
-        local id = res.success and res.data and res.data.id or nil
-        if id then
-            uuidCache[cacheKey] = id
-            callback(id)
-        elseif res.status == 404 or res.status == 204 then
-            uuidCache[cacheKey] = false
-            callback(nil, true)
-        else
-            callback(nil, false)
-        end
-    end)
+    -- Mowojang first (Mojang's API without its rate limit), Mojang itself when Mowojang fails.
+    local function ask(base, fallback)
+        starfish.http.get(base .. starfish.http.encodeUri(query), function(res)
+            local id = res.success and res.data and res.data.id or nil
+            if id then
+                uuidCache[cacheKey] = id
+                callback(id)
+            elseif res.status == 404 or res.status == 204 then
+                uuidCache[cacheKey] = false
+                callback(nil, true)
+            elseif fallback then
+                trace("Mowojang failed for " .. query .. " (" .. tostring(res.error or res.status) .. "), asking Mojang")
+                ask(fallback)
+            else
+                callback(nil, false)
+            end
+        end)
+    end
+    ask(MOJANG_PROFILE_API, "https://api.mojang.com/users/profiles/minecraft/")
 end
 
 local function describeError(res)
