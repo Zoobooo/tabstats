@@ -97,8 +97,6 @@ local lastPregame = nil
 
 local NICKED_STATS = { isNicked = true }
 
-local DEBUG_FILE = (os.getenv("TEMP") or ".") .. "/tabstats-debug.log"
-
 local function describe(value, depth)
     depth = depth or 0
     if type(value) ~= "table" then return tostring(value) end
@@ -113,15 +111,9 @@ local function describe(value, depth)
     return "{" .. table.concat(parts, ", ") .. "}"
 end
 
+-- Starfish 2 plugins have no file access (no io, os.getenv), so debug lines only go to Starfish's log.
 local function trace(message)
     starfish.log.debug(message)
-    if starfish.config.get("diagnostics.logFile", false) ~= true then return end
-    pcall(function()
-        local file = io.open(DEBUG_FILE, "a")
-        if not file then return end
-        file:write(os.date("%H:%M:%S") .. "  " .. message .. "\n")
-        file:close()
-    end)
 end
 
 local function getConfig(key, default)
@@ -576,9 +568,6 @@ local function registerSchema()
         { key = "tab.replays", type = "toggle", default = true, description = "Also show tab stats while watching a Hypixel replay (/replay)." })
     toggleSection("headerLabels", "Column Labels",
         { key = "stats.headerLabels", type = "toggle", default = true, description = "Show column labels in the tab list header (Tab list style)." })
-
-    toggleSection("diagnostics", "Debug Log File",
-        { key = "diagnostics.logFile", type = "toggle", default = false, description = "Write a debug log to %TEMP%\\tabstats-debug.log." })
 
     starfish.schema.section({
         key = "respawnTimer",
