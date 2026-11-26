@@ -1976,7 +1976,9 @@ end
 local function nameText(entry, nick)
     local others = entry.uuid and (starfish.display.othersSuffix(entry.uuid) or "") or ""
     if nick then others = others:gsub("%s*§c%[NICK%]", ""):gsub("%s*%[NICK%]", "") end
-    return (entry.prefix or "") .. entry.name .. (entry.suffix or "") .. others
+    -- Team letters come bold ("§9§lB"); the overlay draws bold doubled, so they're drawn plain.
+    local prefix = (entry.prefix or ""):gsub("§[lL]", "")
+    return prefix .. entry.name .. (entry.suffix or "") .. others
 end
 
 local function overlayLayout(measure)
