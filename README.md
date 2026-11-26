@@ -1,6 +1,6 @@
 # Tab Stats
 
-Beta. Tab stats for Bed Wars, SkyWars, Murder Mystery and Duels. Needs your own Hypixel API key.
+Beta. Tab stats for Bed Wars, SkyWars, Murder Mystery and Duels. Keyless via urchin or own API key.
 
 ## Requires
 
