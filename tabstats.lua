@@ -29,9 +29,9 @@ In replays every player has a replay UUID instead of their real one, so nicks ar
 
 ### When something fails
 
-Stats come from Hypixel with your own API key if you set one. Without a key, or when a lookup with it fails, they come keyless through the urchin plugin.
+Stats come from Hypixel with your own API key or keyless through the urchin plugin. The Stats Source setting picks one, or one with the other as fallback when it fails (default: Hypixel, urchin fallback; without a key, urchin answers).
 
-If a lookup can't be done (a rejected key, Hypixel, Mojang or urchin not answering, no key and no urchin), Tab Stats says so in chat. In that case a missing stat or a missing nick mark can mean "couldn't check", not "not a nick".
+If a lookup can't be done (a rejected key, Hypixel, Mojang or urchin not answering, no source left), Tab Stats says so in chat, and says when it switches to the fallback. In that case a missing stat or a missing nick mark can mean "couldn't check", not "not a nick".
 ]],
     dependencies = {
         { name = "hypixel-mod-api", minVersion = "1.0.0" },
@@ -561,9 +561,15 @@ local function registerSchema()
     starfish.schema.section({
         key = "stats",
         label = "Hypixel API",
-        description = "Stats come from the Hypixel API with your own key (developer.hypixel.net) if set. Without one, or when it fails, they come keyless through the urchin plugin.",
+        description = "Stats come from the Hypixel API with your own key (developer.hypixel.net), keyless through the urchin plugin, or one with the other as fallback.",
         settings = {
-            { key = "stats.apiKey", type = "text", default = "", description = "Your Hypixel API key. Optional: without one, stats come through the urchin plugin." },
+            { key = "stats.source", type = "cycle", default = "hypixelFirst", label = "Stats Source", description = "Where stats come from. With a fallback, the second source is only asked when the first fails.", values = {
+                { text = "Hypixel, urchin fallback", value = "hypixelFirst" },
+                { text = "Urchin, Hypixel fallback", value = "urchinFirst" },
+                { text = "Hypixel only", value = "hypixel" },
+                { text = "Urchin only", value = "urchin" }
+            }},
+            { key = "stats.apiKey", type = "text", default = "", label = "API Key", description = "Your Hypixel API key, used when the stats source includes Hypixel." },
         }
     })
 
@@ -786,10 +792,33 @@ do
         end)
     end
 
-    local function keyFailureNotice(cause, message, urchinMissing)
-        local outcome = urchinMissing and " and urchin isn't installed. Stats are missing and nicks may be missed."
-            or ", so stats come from urchin instead."
-        if cause == "badkey" then
+    -- The stats source setting: the order sources are asked in, the next one only when one fails.
+    local SOURCE_STEPS = {
+        hypixelFirst = { "hypixel", "urchin" },
+        urchinFirst = { "urchin", "hypixel" },
+        hypixel = { "hypixel" },
+        urchin = { "urchin" },
+    }
+    local SOURCE_NAMES = { hypixel = "Hypixel", urchin = "urchin" }
+
+    local function sourceSteps()
+        return SOURCE_STEPS[getConfig("stats.source", "hypixelFirst")] or SOURCE_STEPS.hypixelFirst
+    end
+
+    -- nextStep: the source asked instead, nil when there is none left. urchinMissing: urchin
+    -- would have been the fallback but isn't installed. noKey: Hypixel was skipped for no key.
+    local function failureNotice(cause, message, nextStep, urchinMissing, noKey)
+        local outcome = nextStep and (", so stats come from " .. SOURCE_NAMES[nextStep] .. " instead.")
+            or ((urchinMissing and " and urchin isn't installed" or "") .. ". Stats are missing and nicks may be missed."
+                .. (noKey and " No Hypixel API key is set either." or ""))
+        if cause == "nokey" then
+            notices.warn(cause, "no Hypixel API key set" .. outcome .. " Add a key in the Tab Stats settings"
+                .. (urchinMissing and " or install urchin." or " or pick a stats source with urchin."))
+        elseif cause == "nourchin" then
+            notices.warn(cause, "urchin isn't installed" .. outcome)
+        elseif cause == "urchin" then
+            notices.warn(cause, "urchin lookups are failing (" .. message .. ")" .. outcome)
+        elseif cause == "badkey" then
             notices.warn(cause, "Hypixel rejected your API key" .. outcome .. " Make a new key at developer.hypixel.net.")
         elseif cause == "mojang" then
             notices.warn(cause, "Mojang name lookups are failing" .. outcome)
@@ -799,28 +828,21 @@ do
     end
 
     -- byShownName: query is the name in the tab, not a real name another plugin found.
-    function fetchStats(key, query, attempt, byShownName)
+    function fetchStats(key, query, byShownName)
         local cached = stats[key]
         if cached and not cached.isLoading and cached.timestamp
             and (os.time() - cached.timestamp < CACHE_TTL or nickData.kept[key]) then
             notifyFetched(key)
             return
         end
-        if cached and cached.isLoading and (attempt or 1) == 1
-            and starfish.time.monotonic() - cached.startedAt < LOADING_TIMEOUT_MS then
-            return
-        end
-
-        local apiKey = hypixelApiKey()
-        if not apiKey and not starfish.plugins.has("urchin") then
-            notices.warn("nokey", "no Hypixel API key set and urchin isn't installed. Stats are hidden and nicks whose"
-                .. " name exists on Mojang can't be detected. Install urchin or add a key in the Tab Stats settings.")
-            stats[key] = { fetchError = "no Hypixel API key set and " .. URCHIN_MISSING }
-            notifyFetched(key)
+        if cached and cached.isLoading and starfish.time.monotonic() - cached.startedAt < LOADING_TIMEOUT_MS then
             return
         end
 
         stats[key] = { isLoading = true, startedAt = starfish.time.monotonic() }
+        local apiKey = hypixelApiKey()
+        local steps = sourceSteps()
+        local noKey = false
 
         local function finish(st)
             stats[key] = st
@@ -843,72 +865,104 @@ do
             end
         end
 
-        -- keyCause and keyMessage say why the lookup with your key failed; nil without a key.
-        local function viaUrchin(fromTab, keyCause, keyMessage)
-            if keyCause then
-                starfish.log.warn("Stats for " .. query .. " failed with your key: " .. keyMessage .. ", trying urchin")
-                keyFailureNotice(keyCause, keyMessage, not starfish.plugins.has("urchin"))
+        local tryStep
+
+        local function failed(index, fromTab, cause, message)
+            local nextStep = steps[index + 1]
+            local urchinMissing = nextStep == "urchin" and not starfish.plugins.has("urchin")
+            if urchinMissing then nextStep = nil end
+            starfish.log.warn("Stats for " .. query .. " failed (" .. message .. ")"
+                .. (nextStep and (", trying " .. SOURCE_NAMES[nextStep]) or ""))
+            if cause == "nokey" then
+                -- No key is a choice, not a failure: only said when nothing else can answer.
+                noKey = true
+                if not nextStep then failureNotice(cause, message, nil, urchinMissing) end
+            else
+                failureNotice(cause, message, nextStep, urchinMissing, noKey)
             end
+            if nextStep then
+                tryStep(index + 1, fromTab)
+            else
+                finish({ fetchError = message })
+            end
+        end
+
+        local function urchinStep(index, fromTab)
             askUrchin(query, function(profile, err)
                 if profile then
                     useProfile(profile, fromTab, "urchin")
-                    return
-                end
-                if err == "nicked" then
+                elseif err == "nicked" then
                     nicked()
-                    return
+                elseif err == URCHIN_MISSING then
+                    failed(index, fromTab, "nourchin", URCHIN_MISSING)
+                else
+                    failed(index, fromTab, "urchin", tostring(err or "urchin sent no data"))
                 end
-                local message = tostring(err or "urchin sent no data")
-                starfish.log.warn("Stats for " .. query .. " failed through urchin: " .. message)
-                if message ~= URCHIN_MISSING then
-                    notices.warn("urchin", "urchin lookups are failing (" .. message .. "). Some stats are missing"
-                        .. " and nicks may be missed.")
-                end
-                finish({ fetchError = message })
             end)
         end
 
-        local function retryOrFallBack(cause, message, fromTab)
-            local tries = attempt or 1
-            if tries < FETCH_RETRIES then
-                starfish.timers.delay(math.floor(RETRY_BASE_MS * 2 ^ (tries - 1)), function()
-                    fetchStats(key, query, tries + 1, byShownName)
+        local function hypixelStep(index, fromTab, attempt, knownUuid)
+            if not apiKey then
+                failed(index, fromTab, "nokey", "no Hypixel API key set")
+                return
+            end
+            local function retry(cause, message, tabUuid)
+                if attempt < FETCH_RETRIES then
+                    starfish.timers.delay(math.floor(RETRY_BASE_MS * 2 ^ (attempt - 1)), function()
+                        hypixelStep(index, tabUuid, attempt + 1)
+                    end)
+                else
+                    failed(index, tabUuid, cause, message)
+                end
+            end
+            local function request(uuid, tabUuid)
+                starfish.http.request({
+                    url = HYPIXEL_PLAYER_API .. uuid,
+                    method = "GET",
+                    headers = { ["API-Key"] = apiKey }
+                }, function(res)
+                    local data = type(res.data) == "table" and res.data or nil
+                    if res.success and data and type(data.player) == "table" then
+                        useProfile(data.player, tabUuid, "Hypixel")
+                    elseif res.success and data and data.player == nil then
+                        nicked()
+                    elseif res.status == 403 then
+                        failed(index, tabUuid, "badkey", describeError(res))
+                    else
+                        retry("hypixel", describeError(res), tabUuid)
+                    end
                 end)
+            end
+            if knownUuid then
+                request(knownUuid, fromTab)
+                return
+            end
+            resolveUuid(query, function(uuid, notFound, tabUuid)
+                if notFound then
+                    nicked()
+                elseif not uuid then
+                    retry("mojang", "UUID lookup failed", tabUuid)
+                else
+                    request(uuid, tabUuid)
+                end
+            end)
+        end
+
+        function tryStep(index, fromTab, uuid)
+            if steps[index] == "hypixel" then
+                hypixelStep(index, fromTab, 1, uuid)
             else
-                viaUrchin(fromTab, cause, message)
+                urchinStep(index, fromTab)
             end
         end
 
+        -- A name Mojang doesn't know is a nick, whatever the source.
         resolveUuid(query, function(uuid, notFound, fromTab)
             if notFound then
                 nicked()
-                return
+            else
+                tryStep(1, fromTab, uuid)
             end
-            if not apiKey then
-                viaUrchin(fromTab)
-                return
-            end
-            if not uuid then
-                retryOrFallBack("mojang", "UUID lookup failed", fromTab)
-                return
-            end
-
-            starfish.http.request({
-                url = HYPIXEL_PLAYER_API .. uuid,
-                method = "GET",
-                headers = { ["API-Key"] = apiKey }
-            }, function(res)
-                local data = type(res.data) == "table" and res.data or nil
-                if res.success and data and type(data.player) == "table" then
-                    useProfile(data.player, fromTab, "Hypixel")
-                elseif res.success and data and data.player == nil then
-                    nicked()
-                elseif res.status == 403 then
-                    viaUrchin(fromTab, "badkey", describeError(res))
-                else
-                    retryOrFallBack("hypixel", describeError(res), fromTab)
-                end
-            end)
         end)
     end
 end
@@ -935,7 +989,7 @@ local function requestStats(name, callback)
     fetchCallbacks[key] = fetchCallbacks[key] or {}
     table.insert(fetchCallbacks[key], done)
 
-    fetchStats(key, query, nil, realName == nil)
+    fetchStats(key, query, realName == nil)
 end
 
 local function statsFor(name)
