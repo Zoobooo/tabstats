@@ -79,7 +79,8 @@ local layoutCache = nil
 local lastHeader = nil
 local warnedOverlap = false
 -- Chat warnings when stats or nick detection can't be trusted, once per cause per game.
-local notices = { shown = {} }
+-- The API key warnings are said once per Starfish session (and again after the key changes).
+local notices = { shown = {}, SESSION = { badkey = true, nokey = true } }
 function notices.warn(cause, message)
     if notices.shown[cause] then return end
     notices.shown[cause] = true
@@ -2926,7 +2927,9 @@ end
 starfish.timers.interval(1000, detectTick)
 
 starfish.events.on("session:join", function()
-    notices.shown = {}
+    for cause in pairs(notices.shown) do
+        if not notices.SESSION[cause] then notices.shown[cause] = nil end
+    end
     nickData.announced, nickData.kept, nickData.heads = {}, {}, {}
     seenOnServer = {}
     joinTracking = true
@@ -3002,7 +3005,14 @@ starfish.events.on("player:listUpdate", function(event)
     end
 end)
 
+notices.lastKey = getConfig("stats.apiKey", "")
+
 starfish.config.onChangeAny(function()
+    local key = getConfig("stats.apiKey", "")
+    if key ~= notices.lastKey then
+        notices.lastKey = key
+        notices.shown.badkey, notices.shown.nokey = nil, nil
+    end
     syncSchemaVisibility()
     dirty = true
     if active and not getConfig(MODES[active].config, true) then
