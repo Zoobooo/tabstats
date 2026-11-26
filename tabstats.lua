@@ -9,7 +9,7 @@ plugin = {
     readme = [[
 ## Nicks
 
-A nicked player has no Hypixel profile under the name you see, so Tab Stats shows `?` for their stats.
+A nicked player uses an account that never joined Hypixel, so there are no stats under the name you see. Tab Stats shows their name in red and `-` for their stats. A player whose profile has no stats at all in the current mode counts as a nick too. `?` means a lookup failed.
 
 Tab Stats doesn't find out who is behind a nick by itself. Another plugin does that, for example the denicker plugin, and tells Tab Stats the real name. Tab Stats then shows that player's stats on the nick's row. If the plugin also sends the player's current name or UUID, Tab Stats uses those.
 
@@ -323,8 +323,31 @@ local function resolveDuelsKey(locationMode)
     return candidates
 end
 
+-- A failed lookup shows "?". A nick shows a red name and gray "-".
 local function statsUnavailable(st)
-    return st.isNicked or st.fetchError
+    return st.fetchError ~= nil
+end
+
+-- Hypixel nicks use an account that never joined, so a profile without a single stat in
+-- the current mode is a nick too. Fields per mode: the stats group, then its counters.
+nickData.MODE_FIELDS = {
+    bedwars = { "bedwars", "wins_bedwars", "losses_bedwars", "kills_bedwars", "deaths_bedwars",
+                "final_kills_bedwars", "final_deaths_bedwars", "beds_broken_bedwars", "beds_lost_bedwars" },
+    skywars = { "skywars", "wins", "losses", "kills", "deaths" },
+    murder = { "murder", "games", "wins", "kills", "deaths" },
+    duels = { "duels", "wins", "losses", "kills", "deaths" },
+}
+
+function nickData.isNick(st)
+    if not st then return false end
+    if st.isNicked then return true end
+    local fields = st.raw and active and nickData.MODE_FIELDS[active]
+    if not fields then return false end
+    local values = st.raw[fields[1]] or {}
+    for index = 2, #fields do
+        if (tonumber(values[fields[index]]) or 0) ~= 0 then return false end
+    end
+    return true
 end
 
 local function group(st, name)
@@ -373,6 +396,7 @@ local function starColumn(getter)
         header = "Stars",
         value = function(st)
             if not st or st.isLoading then return "§8[-✫]" end
+            if nickData.isNick(st) then return "§7[-✫]" end
             if statsUnavailable(st) then return "§7[?✫]" end
             return getter(st)
         end
@@ -384,6 +408,7 @@ local function ratioColumn(header, getter, colorName)
         header = header,
         value = function(st)
             if not st or st.isLoading then return "§8-" end
+            if nickData.isNick(st) then return "§7-" end
             if statsUnavailable(st) then return "§7?" end
             local r = getter(st)
             return STAT_COLORS[colorName](r) .. string.format("%.2f", r)
@@ -397,6 +422,7 @@ local function countColumn(header, getter, colorName, missingIsHidden)
         header = header,
         value = function(st)
             if not st or st.isLoading then return "§8-" end
+            if nickData.isNick(st) then return "§7-" end
             if statsUnavailable(st) then return "§7?" end
             local value = getter(st)
             if value == nil and missingIsHidden then return "§7?" end
@@ -1226,7 +1252,7 @@ local function buildRow(name, uuid, layout)
         local start = layout.starts[index]
         if column.isName then
             padTo(start)
-            table.insert(parts, teamColorOf(name))
+            table.insert(parts, nickData.isNick(st) and "§c" or teamColorOf(name))
             parts = suffix
             x = x + nameColumnWidth(name, uuid)
         else
@@ -1875,9 +1901,9 @@ local function hpText(score)
     return "§a" .. math.floor(score)
 end
 
-local function nameText(entry)
+local function nameText(entry, nick)
     local others = entry.uuid and (starfish.display.othersSuffix(entry.uuid) or "") or ""
-    return (entry.prefix or "") .. entry.name .. (entry.suffix or "") .. others
+    return (entry.prefix or "") .. (nick and "§c" or "") .. entry.name .. (entry.suffix or "") .. others
 end
 
 local function overlayLayout(measure)
@@ -1907,7 +1933,7 @@ local function overlayLayout(measure)
             local grayed = isGrayed(entry.name, ownTeam)
             for colIndex, column in ipairs(cols) do
                 if column.isName then
-                    row[colIndex] = nameText(entry)
+                    row[colIndex] = nameText(entry, nickData.isNick(st))
                 else
                     local value = column.value(st)
                     row[colIndex] = grayed and grayText(value) or value
