@@ -1972,8 +1972,10 @@ local function hpText(score)
     return "§a" .. math.floor(score)
 end
 
-local function nameText(entry)
+-- nick: the row already says [NICK], so another plugin's [NICK] tag (Nick Alerts) is left out.
+local function nameText(entry, nick)
     local others = entry.uuid and (starfish.display.othersSuffix(entry.uuid) or "") or ""
+    if nick then others = others:gsub("%s*§c%[NICK%]", ""):gsub("%s*%[NICK%]", "") end
     return (entry.prefix or "") .. entry.name .. (entry.suffix or "") .. others
 end
 
@@ -2005,7 +2007,7 @@ local function overlayLayout(measure)
             local firstStat = nickData.firstStatColumn(cols)
             for colIndex, column in ipairs(cols) do
                 if column.isName then
-                    row[colIndex] = nameText(entry)
+                    row[colIndex] = nameText(entry, nickData.isNick(st))
                 else
                     local value, label = nickData.cell(column, st, colIndex == firstStat)
                     row[colIndex] = (grayed and not label) and grayText(value) or value
