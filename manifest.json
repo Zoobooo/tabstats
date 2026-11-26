@@ -1,7 +1,7 @@
 {
   "name": "tabstats",
   "display_name": "Tab Stats",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Beta. Tab stats for Bed Wars, SkyWars, Murder Mystery and Duels. Keyless via urchin or own API key.",
   "prefix": "§dTS",
   "homepage": null,
