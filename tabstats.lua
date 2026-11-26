@@ -9,7 +9,7 @@ plugin = {
     readme = [[
 ## Nicks
 
-A nicked player uses an account that never joined Hypixel, so there are no stats under the name you see. Tab Stats shows their name in red and `-` for their stats. A player whose profile has no stats at all in the current mode counts as a nick too. `?` means a lookup failed.
+A nicked player uses an account that never joined Hypixel, so there are no stats under the name you see. Tab Stats shows a red `[NICK]` in the first stat column and `-` for the other stats. A player whose profile has no stats at all in the current mode counts as a nick too. `?` means a lookup failed.
 
 Tab Stats doesn't find out who is behind a nick by itself. Another plugin does that, for example the denicker plugin, and tells Tab Stats the real name. Tab Stats then shows that player's stats on the nick's row. If the plugin also sends the player's current name or UUID, Tab Stats uses those.
 
@@ -323,7 +323,7 @@ local function resolveDuelsKey(locationMode)
     return candidates
 end
 
--- A failed lookup shows "?". A nick shows a red name and gray "-".
+-- A failed lookup shows "?". A nick shows a red [NICK] and gray "-".
 local function statsUnavailable(st)
     return st.fetchError ~= nil
 end
@@ -337,6 +337,22 @@ nickData.MODE_FIELDS = {
     murder = { "murder", "games", "wins", "kills", "deaths" },
     duels = { "duels", "wins", "losses", "kills", "deaths" },
 }
+
+-- A nick's first stat column says [NICK] in red, whatever stat it is set to.
+nickData.LABEL = "§c[NICK]"
+
+function nickData.firstStatColumn(cols)
+    for index, column in ipairs(cols) do
+        if not column.isName then return index end
+    end
+    return nil
+end
+
+-- Returns the cell text and whether it is the [NICK] label (which stays red in a grayed row).
+function nickData.cell(column, st, first)
+    if first and nickData.isNick(st) then return nickData.LABEL, true end
+    return column.value(st), false
+end
 
 function nickData.isNick(st)
     if not st then return false end
@@ -1139,11 +1155,11 @@ local function computeMaxNameColumnWidth()
     return maxWidth
 end
 
-local function maxColumnWidth(column)
+local function maxColumnWidth(column, first)
     if column.isName then return computeMaxNameColumnWidth() end
     local maxWidth = textWidth(column.header)
     for name in pairs(managed) do
-        local width = textWidth(column.value(statsFor(name)))
+        local width = textWidth(nickData.cell(column, statsFor(name), first))
         if width > maxWidth then maxWidth = width end
     end
     return maxWidth
@@ -1257,7 +1273,7 @@ local function computeLayout()
     local widths, starts = {}, {}
     local x = teamPrefixPad
     for index, column in ipairs(cols) do
-        widths[index] = maxColumnWidth(column)
+        widths[index] = maxColumnWidth(column, index == nickData.firstStatColumn(cols))
         if index > 1 then
             x = x + (column.isName and NAME_GAP or GUTTER)
         elseif not column.isName then
@@ -1306,12 +1322,12 @@ local function buildRow(name, uuid, layout)
         local start = layout.starts[index]
         if column.isName then
             padTo(start)
-            table.insert(parts, nickData.isNick(st) and "§c" or teamColorOf(name))
+            table.insert(parts, teamColorOf(name))
             parts = suffix
             x = x + nameColumnWidth(name, uuid)
         else
-            local text = column.value(st)
-            if isGrayed(name, layout.ownTeam) then text = grayText(text) end
+            local text, label = nickData.cell(column, st, index == nickData.firstStatColumn(layout.columns))
+            if isGrayed(name, layout.ownTeam) and not label then text = grayText(text) end
             local width = textWidth(text)
             padTo(start + math.floor((layout.widths[index] - width) / 2))
             table.insert(parts, text)
@@ -1955,9 +1971,9 @@ local function hpText(score)
     return "§a" .. math.floor(score)
 end
 
-local function nameText(entry, nick)
+local function nameText(entry)
     local others = entry.uuid and (starfish.display.othersSuffix(entry.uuid) or "") or ""
-    return (entry.prefix or "") .. (nick and "§c" or "") .. entry.name .. (entry.suffix or "") .. others
+    return (entry.prefix or "") .. entry.name .. (entry.suffix or "") .. others
 end
 
 local function overlayLayout(measure)
@@ -1985,12 +2001,13 @@ local function overlayLayout(measure)
         else
             local st = statsFor(entry.name)
             local grayed = isGrayed(entry.name, ownTeam)
+            local firstStat = nickData.firstStatColumn(cols)
             for colIndex, column in ipairs(cols) do
                 if column.isName then
-                    row[colIndex] = nameText(entry, nickData.isNick(st))
+                    row[colIndex] = nameText(entry)
                 else
-                    local value = column.value(st)
-                    row[colIndex] = grayed and grayText(value) or value
+                    local value, label = nickData.cell(column, st, colIndex == firstStat)
+                    row[colIndex] = (grayed and not label) and grayText(value) or value
                 end
             end
             if scores then row.hp = hpText(scores[entry.name] or 0) end
